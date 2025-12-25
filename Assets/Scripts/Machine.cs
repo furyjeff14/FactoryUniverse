@@ -8,6 +8,7 @@ public class Machine : MonoBehaviour
 
     [HideInInspector] public Dictionary<string, float> inputBuffers = new();
     [HideInInspector] public Dictionary<string, float> outputBuffers = new();
+    public List<ConveyorBelt> connectedBelts = new List<ConveyorBelt>();
 
     public List<Machine> connectedMachines = new();
 
@@ -132,6 +133,18 @@ public class Machine : MonoBehaviour
                     machine.inputBuffers[resource] += amount;
                     outputBuffers[resource] -= amount;
                 }
+            }
+        }
+
+        // Send outputs to connected belts
+        foreach (var belt in connectedBelts)
+        {
+            foreach (var resource in outputBuffers.Keys)
+            {
+                if (outputBuffers[resource] <= 0f) continue;
+
+                belt.ReceiveResource(resource, Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime));
+                outputBuffers[resource] -= Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime);
             }
         }
     }

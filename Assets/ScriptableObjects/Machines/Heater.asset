@@ -13,8 +13,8 @@ MonoBehaviour:
   m_Name: Heater
   m_EditorClassIdentifier: 
   position: {x: 0, y: 0}
-  machineName: Driller
-  role: 0
+  machineName: Heater
+  role: 1
   inputs: []
   outputs: []
   extractionRate: 1

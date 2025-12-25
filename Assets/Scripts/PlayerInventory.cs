@@ -5,11 +5,11 @@ using UnityEngine;
 public class PlayerInventory : MonoBehaviour
 {
     /* =======================
-     * RESOURCES
-     * ======================= */
-
+       RESOURCES
+    ======================= */
     private Dictionary<string, float> resources = new();
     public Action OnChangeInventoryItem;
+    public Action OnToggleInventoryItem;
 
     public void AddResource(string resourceName, float amount)
     {
@@ -20,16 +20,13 @@ public class PlayerInventory : MonoBehaviour
     }
 
     public float GetResourceAmount(string resourceName)
-    {
-        return resources.TryGetValue(resourceName, out float v) ? v : 0f;
-    }
+        => resources.TryGetValue(resourceName, out float v) ? v : 0f;
 
     public bool HasResources(Dictionary<string, float> cost)
     {
         foreach (var c in cost)
             if (GetResourceAmount(c.Key) < c.Value)
                 return false;
-
         return true;
     }
 
@@ -40,53 +37,66 @@ public class PlayerInventory : MonoBehaviour
     }
 
     /* =======================
-     * BUILD INVENTORY (HOTBAR)
-     * ======================= */
-
+       BUILD INVENTORY (HOTBAR)
+    ======================= */
     [Header("Build Inventory (Hotbar)")]
     public List<BuildItemSO> buildItems = new List<BuildItemSO>();
-    public int selectedIndex = -1;
+    public int selectedIndex = 0;
 
-    public BuildItemSO SelectedItem =>
-        buildItems.Count > 0 ? buildItems[selectedIndex] : null;
+    public BuildItemSO SelectedItem
+    {
+        get
+        {
+            if (buildItems.Count == 0) return null;
+            selectedIndex = Mathf.Clamp(selectedIndex, 0, buildItems.Count - 1);
+            return buildItems[selectedIndex];
+        }
+    }
 
     void Update()
     {
         HandleNumberKeys();
+        // Optional: Enable scroll switching
+        // HandleScrollWheel();
     }
 
     void HandleNumberKeys()
     {
-        int max = Mathf.Min(buildItems.Count, 9);
+        int max = Mathf.Min(buildItems.Count, 9); // hotbar keys 1-9
 
         for (int i = 0; i < max; i++)
         {
             if (Input.GetKeyDown(KeyCode.Alpha1 + i))
             {
-                if (selectedIndex == -1 || selectedIndex != i)
+                if (selectedIndex != i)
                 {
-                    GetComponent<MachinePlacement>().SetEnablePlacement(true);
-                } else
-                {
-                    GetComponent<MachinePlacement>().SetEnablePlacement();
-                }
-
-                if(selectedIndex != i)
-                {
+                    selectedIndex = i;
                     OnChangeInventoryItem?.Invoke();
                 }
-
-                selectedIndex = i;
-                ClampIndex();
+                else
+                {
+                    // Toggle placement or refresh preview
+                    OnToggleInventoryItem?.Invoke();
+                }
             }
         }
     }
 
-    void ClampIndex()
+    // Optional: Hotbar scroll selection
+    void HandleScrollWheel()
     {
-        if (buildItems.Count == 0)
-            selectedIndex = 0;
-        else
-            selectedIndex = Mathf.Clamp(selectedIndex, 0, buildItems.Count - 1);
+        if (buildItems.Count == 0 || Mathf.Abs(Input.mouseScrollDelta.y) < 0.01f)
+            return;
+
+        selectedIndex -= (int)Input.mouseScrollDelta.y;
+        WrapIndex();
+        OnChangeInventoryItem?.Invoke();
+    }
+
+    void WrapIndex()
+    {
+        if (buildItems.Count == 0) { selectedIndex = 0; return; }
+        if (selectedIndex < 0) selectedIndex = buildItems.Count - 1;
+        if (selectedIndex >= buildItems.Count) selectedIndex = 0;
     }
 }
