@@ -1,4 +1,4 @@
-#if UNITY_EDITOR
+﻿#if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEditor.UIElements;
@@ -21,11 +21,18 @@ public class FactoryGraphWindow : EditorWindow
     {
         ConstructGraphView();
         GenerateToolbar();
+        // Subscribe to new graph
+        if(graphSO != null)
+            graphSO.OnGraphChanged += OnGraphChanged;
     }
 
     private void OnDisable()
     {
-        rootVisualElement.Remove(graphView);
+        if (graphView != null)
+        {
+            graphSO.OnGraphChanged -= OnGraphChanged;
+            rootVisualElement.Remove(graphView);
+        }
     }
 
     private void ConstructGraphView()
@@ -38,9 +45,99 @@ public class FactoryGraphWindow : EditorWindow
         rootVisualElement.Add(graphView);
     }
 
+    private void OnGraphChanged()
+    {
+        if (graphView != null && graphSO != null)
+        {
+            // DelayCall avoids repaint conflicts
+            UnityEditor.EditorApplication.delayCall += () =>
+            {
+                if (this != null)
+                    graphView.ReloadGraph(graphSO);
+            };
+        }
+    }
+
+    private void OnSelectionChange()
+    {
+        if (Selection.activeObject is FactoryGraphSO graph)
+        {
+            LoadGraph(graph);
+            Repaint();
+        }
+    }
+
+    public void LoadGraph(FactoryGraphSO graph)
+    {
+        if (graph == null)
+            return;
+
+        graphSO = graph;
+        graphView.ReloadGraph(graph);
+
+        // Save path to EditorPrefs
+        string path = AssetDatabase.GetAssetPath(graphSO);
+        EditorPrefs.SetString("FactoryGraph_LastGraphPath", path);
+    }
+
+    // ────────────── Load all nodes from a folder ──────────────
+    private void LoadAllNodesFromFolder()
+    {
+        if (graphSO == null)
+        {
+            Debug.LogWarning("No graph assigned!");
+            return;
+        }
+
+        string folderPath = EditorUtility.OpenFolderPanel("Select Folder with GraphNodeSO Assets", "Assets", "");
+        if (string.IsNullOrEmpty(folderPath))
+            return;
+
+        if (folderPath.StartsWith(Application.dataPath))
+            folderPath = "Assets" + folderPath.Substring(Application.dataPath.Length);
+
+        string[] guids = AssetDatabase.FindAssets("t:GraphNodeSO", new[] { folderPath });
+
+        foreach (string guid in guids)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            var nodeSO = AssetDatabase.LoadAssetAtPath<GraphNodeSO>(path);
+            if (nodeSO != null && !graphSO.nodes.Contains(nodeSO))
+            {
+                graphView.AddNode(nodeSO);
+                EditorUtility.SetDirty(graphSO);
+            }
+        }
+
+        AssetDatabase.SaveAssets();
+    }
+
     private void GenerateToolbar()
     {
         var toolbar = new Toolbar();
+
+        // Load previous graph button
+        var loadPrevBtn = new ToolbarButton(() =>
+        {
+            string path = EditorPrefs.GetString("FactoryGraph_LastGraphPath", "");
+            if (string.IsNullOrEmpty(path))
+            {
+                Debug.LogWarning("No previous Factory Graph found.");
+                return;
+            }
+
+            var graph = AssetDatabase.LoadAssetAtPath<FactoryGraphSO>(path);
+            if (graph == null)
+            {
+                Debug.LogWarning("Previous Factory Graph could not be loaded. It might have been deleted or moved.");
+                return;
+            }
+
+            graphView.ReloadGraph(graph);
+        })
+        {
+            text = "Load Previous Graph"
+        };
 
         var loadButton = new Button(() =>
         {
@@ -49,7 +146,7 @@ public class FactoryGraphWindow : EditorWindow
             {
                 path = "Assets" + path.Substring(Application.dataPath.Length);
                 graphSO = AssetDatabase.LoadAssetAtPath<FactoryGraphSO>(path);
-                graphView.LoadGraph(graphSO);
+                graphView.ReloadGraph(graphSO);
             }
         })
         { text = "Load Graph" };
@@ -64,6 +161,17 @@ public class FactoryGraphWindow : EditorWindow
         })
         { text = "Save Graph" };
 
+        var loadAllBtn = new Toolbar();
+
+        var loadBtn = new ToolbarButton(() =>
+        {
+            LoadAllNodesFromFolder();
+        })
+        { text = "Load Nodes From Folder" };
+
+        toolbar.Add(loadAllBtn);
+        toolbar.Add(loadBtn);
+        toolbar.Add(loadPrevBtn);
         toolbar.Add(loadButton);
         toolbar.Add(saveButton);
         rootVisualElement.Add(toolbar);
