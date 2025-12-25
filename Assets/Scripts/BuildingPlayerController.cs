@@ -15,7 +15,11 @@ public class BuildingPlayerController : MonoBehaviour
     {
         if(Input.GetKeyDown(KeyCode.Alpha1))
         {
-            GetComponent<MachinePlacement>().SetEnablePlacement();
+           // GetComponent<MachinePlacement>().SetEnablePlacement();
+        }
+        if (Input.GetKeyDown(KeyCode.Alpha2))
+        {
+           // GetComponent<MachinePlacement>().SetEnablePlacement();
         }
     }
 }

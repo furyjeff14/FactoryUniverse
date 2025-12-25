@@ -1,100 +1,224 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class MachinePlacement : MonoBehaviour
 {
     [Header("Placement Settings")]
-    public LayerMask placementLayer;       // Layers you can place machines on
-    public float placementDistance = 5f;   // How far from player
-    public float gridSize = 1f;            // Grid snapping size
+    public LayerMask placementLayer;
+    public float placementDistance = 5f;
+    public float gridSize = 1f;
+    public float rotationStep = 15f;
 
     [Header("References")]
     public Transform playerCamera;
-    public GameObject placementPreviewPrefab;  // Ghost machine prefab
+    public GameObject placementPreviewPrefab;
+    public PlayerInventory inventory;
+
     private GameObject currentPreview;
+    private float previewRotationY;
+    private bool enable;
 
-    [Header("Machine Prefabs")]
-    public GameObject[] machinePrefabs;    // Prefabs mapped to MachineNodeSO
-    private int selectedMachineIndex = 0;
+    private bool validPlacement = false;
+    public bool debug = true;
 
-    private bool enable = false;
+    private void Start()
+    {
+        inventory.OnChangeInventoryItem += DestroyPreview;
+    }
+
+    private void OnDisable()
+    {
+        inventory.OnChangeInventoryItem -= DestroyPreview;
+    }
 
     void Update()
     {
-        if (enable)
-        {
-            HandlePreview();
-            HandlePlacementInput();
-            HandleSwitchMachine();
-        }
+        if (!enable) return;
+
+        HandlePreview();
+        HandlePlacementInput();
+        HandlePreviewRotation();
+    }
+
+    public void SetEnablePlacement(bool _enable)
+    {
+        enable = _enable;
+        if (!enable) DestroyPreview();
     }
 
     public void SetEnablePlacement()
     {
         enable = !enable;
-        if (!enable && currentPreview != null)
-        {
-            Destroy(currentPreview);
-        }
+        SetEnablePlacement(enable);
     }
 
+    /* =========================
+     * PREVIEW
+     * ========================= */
     void HandlePreview()
     {
-        Ray ray = new Ray(playerCamera.position, playerCamera.forward);
-        if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, placementLayer))
+        var item = inventory.SelectedItem;
+        if (item == null)
         {
-            Vector3 position = SnapToGrid(hit.point);
+            DestroyPreview();
+            return;
+        }
 
-            if (currentPreview == null)
-            {
-                currentPreview = Instantiate(placementPreviewPrefab, position, Quaternion.identity);
-            }
-            else
-            {
-                currentPreview.transform.position = position;
-            }
+        Ray ray = new Ray(playerCamera.position, playerCamera.forward);
+        if (!Physics.Raycast(ray, out RaycastHit hit, placementDistance, placementLayer))
+        {
+            DestroyPreview();
+            return;
+        }
+
+        Vector3 position = SnapToGrid(hit.point);
+
+        // Snap on top of resource node
+        validPlacement = true;
+        if (hit.collider.TryGetComponent(out ResourceNode node))
+        {
+            Collider col = node.GetComponent<Collider>();
+            position = col.bounds.center;
+            position.y = col.bounds.max.y;
+
+            if (item.machineData.role != MachineRole.Extractor)
+                validPlacement = false;
         }
         else
         {
-            if (currentPreview != null)
-                Destroy(currentPreview);
+            if (item.machineData.role == MachineRole.Extractor)
+                validPlacement = false;
         }
+
+        if (currentPreview == null)
+        {
+            currentPreview = Instantiate(item.prefab, position, Quaternion.Euler(0, previewRotationY, 0));
+            DisablePreviewColliders(currentPreview);
+        }
+        else
+        {
+            currentPreview.transform.SetPositionAndRotation(position, Quaternion.Euler(0, previewRotationY, 0));
+        }
+
+        SetPreviewColor(validPlacement);
     }
 
+    void DestroyPreview()
+    {
+        if (currentPreview != null)
+            Destroy(currentPreview);
+    }
+
+    /* =========================
+     * INPUT
+     * ========================= */
     void HandlePlacementInput()
     {
-        if (currentPreview != null && Input.GetMouseButtonDown(0)) // Left click
+        if (currentPreview == null) return;
+        if (!validPlacement) return;
+
+        if (Input.GetMouseButtonDown(0))
         {
-            PlaceMachine(currentPreview.transform.position);
+            PlaceMachine(currentPreview.transform.position, previewRotationY);
         }
     }
 
-    void HandleSwitchMachine()
+    void HandlePreviewRotation()
     {
-        if (Input.mouseScrollDelta.y != 0)
+        float scroll = Input.mouseScrollDelta.y;
+        if (Mathf.Abs(scroll) > 0.01f)
         {
-            selectedMachineIndex += (int)Input.mouseScrollDelta.y;
-            if (selectedMachineIndex < 0) selectedMachineIndex = machinePrefabs.Length - 1;
-            if (selectedMachineIndex >= machinePrefabs.Length) selectedMachineIndex = 0;
+            previewRotationY += scroll * rotationStep;
+            previewRotationY = Mathf.Round(previewRotationY / rotationStep) * rotationStep;
 
             if (currentPreview != null)
+                currentPreview.transform.rotation = Quaternion.Euler(0, previewRotationY, 0);
+        }
+    }
+
+    /* =========================
+     * PLACE
+     * ========================= */
+    void PlaceMachine(Vector3 position, float rotationY)
+    {
+        var item = inventory.SelectedItem;
+        if (item == null) return;
+
+        if (!debug)
+        {
+            var costDict = new Dictionary<string, float>();
+            foreach (var c in item.cost)
+                costDict[c.resourceName] = c.amount;
+
+            if (!inventory.HasResources(costDict))
             {
-                Destroy(currentPreview);
-                currentPreview = Instantiate(placementPreviewPrefab, currentPreview.transform.position, Quaternion.identity);
+                Debug.Log("Not enough resources");
+                return;
+            }
+
+            inventory.ConsumeResources(costDict);
+        }
+
+        GameObject machineObj = Instantiate(item.prefab, position, Quaternion.Euler(0, rotationY, 0));
+        Machine machine = machineObj.GetComponent<Machine>();
+        if (machine != null)
+        {
+            machine.Initialize(item.machineData);
+
+            // Auto-connect to ResourceNode if this is an extractor
+            if (item.machineData.role == MachineRole.Extractor)
+            {
+                Ray ray = new Ray(playerCamera.position, playerCamera.forward);
+                if (Physics.Raycast(ray, out RaycastHit hit, placementDistance, placementLayer))
+                {
+                    if (hit.collider.TryGetComponent(out ResourceNode node))
+                    {
+                        node.ConnectMachine(machine);
+                        Debug.Log($"{machine.machineData.name} connected to {node.resourceData.ResourceName}");
+                    }
+                }
             }
         }
     }
 
-    void PlaceMachine(Vector3 position)
-    {
-        GameObject prefabToPlace = machinePrefabs[selectedMachineIndex];
-        Instantiate(prefabToPlace, position, Quaternion.identity);
-    }
-
+    /* =========================
+     * HELPERS
+     * ========================= */
     Vector3 SnapToGrid(Vector3 position)
     {
-        float x = Mathf.Round(position.x / gridSize) * gridSize;
-        float y = Mathf.Round(position.y / gridSize) * gridSize;
-        float z = Mathf.Round(position.z / gridSize) * gridSize;
-        return new Vector3(x, y, z);
+        return new Vector3(
+            Mathf.Round(position.x / gridSize) * gridSize,
+            Mathf.Round(position.y / gridSize) * gridSize,
+            Mathf.Round(position.z / gridSize) * gridSize
+        );
+    }
+
+    void DisablePreviewColliders(GameObject preview)
+    {
+        foreach (Collider col in preview.GetComponentsInChildren<Collider>())
+            col.enabled = false;
+    }
+
+    void SetPreviewMaterial(GameObject preview)
+    {
+        foreach (Renderer r in preview.GetComponentsInChildren<Renderer>())
+        {
+            Material mat = new Material(r.sharedMaterial);
+            mat.color = new Color(1f, 1f, 1f, 0.5f);
+            r.material = mat;
+        }
+    }
+
+    void SetPreviewColor(bool valid)
+    {
+        if (currentPreview == null) return;
+
+        Color c = valid ? Color.green : Color.red;
+        foreach (Renderer r in currentPreview.GetComponentsInChildren<Renderer>())
+        {
+            Material mat = r.material;
+            mat.color = new Color(c.r, c.g, c.b, 0.5f);
+            r.material = mat;
+        }
     }
 }

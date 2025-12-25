@@ -30,9 +30,10 @@ public class FactoryGraphWindow : EditorWindow
     {
         if (graphView != null)
         {
-            graphSO.OnGraphChanged -= OnGraphChanged;
             rootVisualElement.Remove(graphView);
         }
+        if(graphSO != null)
+            graphSO.OnGraphChanged -= OnGraphChanged;
     }
 
     private void ConstructGraphView()

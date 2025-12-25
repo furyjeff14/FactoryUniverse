@@ -3,52 +3,117 @@ using UnityEngine;
 
 public class Machine : MonoBehaviour
 {
-    [Header("Machine Data")]
     public MachineNodeSO machineData;
+    public float productionRate = 1f; // units/sec
 
-    [Header("Runtime Buffers")]
-    public Dictionary<string, float> inputBuffers = new Dictionary<string, float>();
-    public Dictionary<string, float> outputBuffers = new Dictionary<string, float>();
+    [HideInInspector] public Dictionary<string, float> inputBuffers = new();
+    [HideInInspector] public Dictionary<string, float> outputBuffers = new();
 
-    [Header("Settings")]
-    public float productionRate = 1f; // units per second
+    public List<Machine> connectedMachines = new();
 
-    [Header("Connections")]
-    public List<Machine> connectedMachines = new List<Machine>();
+    private bool initialized = false;
+    private ResourceNode attachedNode; // for extractors
 
     void Start()
     {
-        // Initialize buffers from machineData
-        foreach (var input in machineData.inputs)
-            inputBuffers[input.ResourceName] = 0f;
-
-        foreach (var output in machineData.outputs)
-            outputBuffers[output.ResourceName] = 0f;
+        if (machineData != null)
+            Initialize(machineData);
     }
 
     void Update()
     {
-        ProcessProduction(Time.deltaTime);
+        if (!initialized) return;
+
+        switch (machineData.role)
+        {
+            case MachineRole.Extractor:
+                ExtractResources(Time.deltaTime);
+                break;
+
+            case MachineRole.Processor:
+                ProcessProduction(Time.deltaTime);
+                TransferOutputs();
+                break;
+        }
+    }
+
+    public void Initialize(MachineNodeSO data)
+    {
+        machineData = data;
+        inputBuffers.Clear();
+        outputBuffers.Clear();
+
+        if (machineData.inputs != null)
+        {
+            foreach (var input in machineData.inputs)
+                inputBuffers[input.ResourceName] = 0f;
+        }
+
+        if (machineData.outputs != null)
+        {
+            foreach (var output in machineData.outputs)
+                outputBuffers[output.ResourceName] = 0f;
+        }
+
+        if (machineData.role == MachineRole.Extractor)
+            FindResourceNode();
+
+        initialized = true;
+    }
+
+    void FindResourceNode()
+    {
+        attachedNode = GetComponentInParent<ResourceNode>()
+                       ?? GetComponentInChildren<ResourceNode>();
+
+        if (attachedNode == null)
+        {
+            ResourceNode[] nodes = FindObjectsOfType<ResourceNode>();
+            float closestDist = float.MaxValue;
+            foreach (var n in nodes)
+            {
+                float dist = Vector3.Distance(transform.position, n.transform.position);
+                if (dist < closestDist)
+                {
+                    closestDist = dist;
+                    attachedNode = n;
+                }
+            }
+        }
+    }
+
+    void ExtractResources(float deltaTime)
+    {
+        if (attachedNode == null) return;
+
+        foreach (var output in machineData.outputs)
+        {
+            float amount = machineData.extractionRate * deltaTime;
+            attachedNode.Extract(amount, output.ResourceName);
+            outputBuffers[output.ResourceName] += amount;
+        }
+
         TransferOutputs();
     }
 
     void ProcessProduction(float deltaTime)
     {
-        // Example: produce outputs if inputs are sufficient
         bool canProduce = true;
+
         foreach (var input in machineData.inputs)
         {
-            if (inputBuffers[input.ResourceName] <= 0f)
+            if (!inputBuffers.ContainsKey(input.ResourceName) || inputBuffers[input.ResourceName] <= 0f)
+            {
                 canProduce = false;
+                break;
+            }
         }
 
         if (!canProduce) return;
 
-        // Consume inputs
         foreach (var input in machineData.inputs)
             inputBuffers[input.ResourceName] -= productionRate * deltaTime;
 
-        // Produce outputs
         foreach (var output in machineData.outputs)
             outputBuffers[output.ResourceName] += productionRate * deltaTime;
     }
@@ -59,24 +124,21 @@ public class Machine : MonoBehaviour
         {
             foreach (var resource in outputBuffers.Keys)
             {
-                float available = outputBuffers[resource];
-                if (available <= 0f) continue;
+                if (outputBuffers[resource] <= 0f) continue;
 
-                // Transfer to connected machine input buffer
                 if (machine.inputBuffers.ContainsKey(resource))
                 {
-                    float transferAmount = Mathf.Min(available, productionRate * Time.deltaTime);
-                    machine.inputBuffers[resource] += transferAmount;
-                    outputBuffers[resource] -= transferAmount;
+                    float amount = Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime);
+                    machine.inputBuffers[resource] += amount;
+                    outputBuffers[resource] -= amount;
                 }
             }
         }
     }
 
-    // Add a machine connection
-    public void ConnectMachine(Machine other)
+    public void ConnectMachine(Machine machine)
     {
-        if (!connectedMachines.Contains(other))
-            connectedMachines.Add(other);
+        if (!connectedMachines.Contains(machine))
+            connectedMachines.Add(machine);
     }
 }
