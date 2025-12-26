@@ -12,7 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 254da5802772c254aa9f509d217628b1, type: 3}
   m_Name: ConveyorBeltUI
   m_EditorClassIdentifier: 
-  itemName: 
-  prefab: {fileID: 7642695589248459926, guid: 7bf287b599c295f46826952e4ff9b741, type: 3}
-  machineData: {fileID: 11400000, guid: 6ad6c2fffa7ac314991881f354e89cea, type: 2}
+  itemName: Conveyor Belt
+  prefab: {fileID: 6803149569676149620, guid: da94318862b595c49a040c669db1e046, type: 3}
+  machineData: {fileID: 0}
+  isBelt: 1
+  beltSpeed: 2
+  beltCapacity: 50
   cost: []

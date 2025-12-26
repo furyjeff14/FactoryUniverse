@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 8735670765044854868}
   - component: {fileID: 7944538709996138941}
   - component: {fileID: 4756384671906990956}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Input
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -289,7 +289,7 @@ GameObject:
   - component: {fileID: 4548200425712445002}
   - component: {fileID: 1255627044297704589}
   - component: {fileID: 2688176732057377835}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Output
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -505,6 +505,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   machineData: {fileID: 0}
   productionRate: 1
+  connectedBelts: []
   connectedMachines: []
 --- !u!1 &5464065874079479592
 GameObject:

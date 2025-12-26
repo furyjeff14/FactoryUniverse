@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 5228457704853313754}
   - component: {fileID: 8707112511600380048}
   - component: {fileID: 4631507719859143201}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Output
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -398,4 +398,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   machineData: {fileID: 11400000, guid: d4ce4330e181f8f40993b38b946d588e, type: 2}
   productionRate: 1
+  outputItemPrefab: {fileID: 0}
+  connectedBelts: []
   connectedMachines: []

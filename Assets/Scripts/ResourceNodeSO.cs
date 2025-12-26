@@ -5,6 +5,8 @@ public class ResourceNodeSO : GraphNodeSO
 {
     [SerializeField] private string resourceName;
     public string ResourceName => resourceName;
+
+    public GameObject resourcePrefab;
     public void SetResourceName(string value) => resourceName = value;
 
     public ResourceNodeSO()

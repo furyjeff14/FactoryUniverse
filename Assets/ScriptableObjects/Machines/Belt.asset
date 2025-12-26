@@ -10,13 +10,12 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 69fa673aab1e0c24d950c5be8a9705c1, type: 3}
-  m_Name: Driller
+  m_Name: Belt
   m_EditorClassIdentifier: 
   position: {x: 0, y: 0}
-  machineName: Driller
+  machineName: 
   role: 0
   inputs: []
-  outputs:
-  - {fileID: 11400000, guid: 3448cd3bc7305df4da0cd7542162083c, type: 2}
+  outputs: []
   extractionRate: 1
   processTime: 1

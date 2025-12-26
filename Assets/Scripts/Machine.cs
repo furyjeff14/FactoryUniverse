@@ -1,19 +1,21 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public class Machine : MonoBehaviour
 {
     public MachineNodeSO machineData;
     public float productionRate = 1f; // units/sec
+    public GameObject outputItemPrefab;
 
     [HideInInspector] public Dictionary<string, float> inputBuffers = new();
     [HideInInspector] public Dictionary<string, float> outputBuffers = new();
-    public List<ConveyorBelt> connectedBelts = new List<ConveyorBelt>();
+    private Dictionary<ConveyorBelt, Dictionary<string, float>> beltTransferTimers = new();
 
+    public List<ConveyorBelt> connectedBelts = new List<ConveyorBelt>();
     public List<Machine> connectedMachines = new();
 
     private bool initialized = false;
-    private ResourceNode attachedNode; // for extractors
+    public ResourceNode attachedNode;
 
     void Start()
     {
@@ -33,9 +35,10 @@ public class Machine : MonoBehaviour
 
             case MachineRole.Processor:
                 ProcessProduction(Time.deltaTime);
-                TransferOutputs();
                 break;
         }
+
+        TransferOutputs();
     }
 
     public void Initialize(MachineNodeSO data)
@@ -45,28 +48,25 @@ public class Machine : MonoBehaviour
         outputBuffers.Clear();
 
         if (machineData.inputs != null)
-        {
             foreach (var input in machineData.inputs)
                 inputBuffers[input.ResourceName] = 0f;
-        }
 
         if (machineData.outputs != null)
-        {
             foreach (var output in machineData.outputs)
                 outputBuffers[output.ResourceName] = 0f;
-        }
 
         if (machineData.role == MachineRole.Extractor)
+        {
             FindResourceNode();
+            ProcessOutputResource(attachedNode);
+        }
 
         initialized = true;
     }
 
     void FindResourceNode()
     {
-        attachedNode = GetComponentInParent<ResourceNode>()
-                       ?? GetComponentInChildren<ResourceNode>();
-
+        attachedNode = GetComponentInParent<ResourceNode>() ?? GetComponentInChildren<ResourceNode>();
         if (attachedNode == null)
         {
             ResourceNode[] nodes = FindObjectsOfType<ResourceNode>();
@@ -83,6 +83,11 @@ public class Machine : MonoBehaviour
         }
     }
 
+    private void ProcessOutputResource(ResourceNode _node)
+    {
+        outputItemPrefab = _node.resourceData.resourcePrefab;
+    }
+
     void ExtractResources(float deltaTime)
     {
         if (attachedNode == null) return;
@@ -91,16 +96,17 @@ public class Machine : MonoBehaviour
         {
             float amount = machineData.extractionRate * deltaTime;
             attachedNode.Extract(amount, output.ResourceName);
+
+            if (!outputBuffers.ContainsKey(output.ResourceName))
+                outputBuffers[output.ResourceName] = 0f;
+
             outputBuffers[output.ResourceName] += amount;
         }
-
-        TransferOutputs();
     }
 
     void ProcessProduction(float deltaTime)
     {
         bool canProduce = true;
-
         foreach (var input in machineData.inputs)
         {
             if (!inputBuffers.ContainsKey(input.ResourceName) || inputBuffers[input.ResourceName] <= 0f)
@@ -112,39 +118,73 @@ public class Machine : MonoBehaviour
 
         if (!canProduce) return;
 
+        float amountProduced = productionRate * deltaTime;
+
         foreach (var input in machineData.inputs)
-            inputBuffers[input.ResourceName] -= productionRate * deltaTime;
+            inputBuffers[input.ResourceName] -= amountProduced;
 
         foreach (var output in machineData.outputs)
-            outputBuffers[output.ResourceName] += productionRate * deltaTime;
+        {
+            if (!outputBuffers.ContainsKey(output.ResourceName))
+                outputBuffers[output.ResourceName] = 0f;
+
+            outputBuffers[output.ResourceName] += amountProduced;
+        }
     }
 
     void TransferOutputs()
     {
+        // Send outputs to connected machines (no cap)
         foreach (var machine in connectedMachines)
         {
-            foreach (var resource in outputBuffers.Keys)
+            foreach (var resource in new List<string>(outputBuffers.Keys))
             {
                 if (outputBuffers[resource] <= 0f) continue;
-
                 if (machine.inputBuffers.ContainsKey(resource))
                 {
-                    float amount = Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime);
-                    machine.inputBuffers[resource] += amount;
-                    outputBuffers[resource] -= amount;
+                    machine.inputBuffers[resource] += outputBuffers[resource];
+                    outputBuffers[resource] = 0f;
                 }
             }
         }
 
-        // Send outputs to connected belts
+        // Send outputs to belts 1 by 1, rate based on belt speed
         foreach (var belt in connectedBelts)
         {
-            foreach (var resource in outputBuffers.Keys)
+            if (belt == null) continue;
+
+            foreach (var resource in new List<string>(outputBuffers.Keys))
             {
                 if (outputBuffers[resource] <= 0f) continue;
 
-                belt.ReceiveResource(resource, Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime));
-                outputBuffers[resource] -= Mathf.Min(outputBuffers[resource], productionRate * Time.deltaTime);
+                if (outputItemPrefab != null)
+                    belt.itemPrefab = outputItemPrefab;
+
+                float unitsPerSecond = belt.speed; // 1 unit per belt speed per second
+
+                // Track leftover fractional units
+                if (!beltTransferTimers.ContainsKey(belt))
+                    beltTransferTimers[belt] = new Dictionary<string, float>();
+
+                if (!beltTransferTimers[belt].ContainsKey(resource))
+                    beltTransferTimers[belt][resource] = 0f;
+
+                beltTransferTimers[belt][resource] += Time.deltaTime * unitsPerSecond;
+
+                int unitsToSend = Mathf.FloorToInt(beltTransferTimers[belt][resource]);
+                beltTransferTimers[belt][resource] -= unitsToSend;
+
+                for (int i = 0; i < unitsToSend; i++)
+                {
+                    if (outputBuffers[resource] <= 0f) break;
+
+                    // Check if belt can accept another visual
+                    float availableSpace = belt.GetAvailableVisualSpace();
+                    if (availableSpace <= 0f) break;
+
+                    belt.ReceiveResource(resource, 1f); // send 1 unit at a time
+                    outputBuffers[resource] -= 1f;
+                }
             }
         }
     }
@@ -153,5 +193,11 @@ public class Machine : MonoBehaviour
     {
         if (!connectedMachines.Contains(machine))
             connectedMachines.Add(machine);
+    }
+
+    public void ConnectBelt(ConveyorBelt belt)
+    {
+        if (!connectedBelts.Contains(belt))
+            connectedBelts.Add(belt);
     }
 }

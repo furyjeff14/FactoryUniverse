@@ -11,6 +11,14 @@ public class PlayerInventory : MonoBehaviour
     public Action OnChangeInventoryItem;
     public Action OnToggleInventoryItem;
 
+    /* =======================
+       BUILD INVENTORY (HOTBAR)
+    ======================= */
+    [Header("Build Inventory (Hotbar)")]
+    public List<BuildItemSO> buildItems = new List<BuildItemSO>();
+    public int selectedIndex = 0;
+
+
     public void AddResource(string resourceName, float amount)
     {
         if (!resources.ContainsKey(resourceName))
@@ -35,13 +43,6 @@ public class PlayerInventory : MonoBehaviour
         foreach (var c in cost)
             resources[c.Key] -= c.Value;
     }
-
-    /* =======================
-       BUILD INVENTORY (HOTBAR)
-    ======================= */
-    [Header("Build Inventory (Hotbar)")]
-    public List<BuildItemSO> buildItems = new List<BuildItemSO>();
-    public int selectedIndex = 0;
 
     public BuildItemSO SelectedItem
     {

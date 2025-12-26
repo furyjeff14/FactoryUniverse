@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public enum BuildType { Machine, Belt }
@@ -25,6 +25,12 @@ public class PlacementManager : MonoBehaviour
     // Belt placement
     private bool placingBelt = false;
     private Vector3 beltStartPos;
+    private readonly List<GameObject> currentPreviews = new();
+    private GameObject idleBeltPreview;
+
+    [Header("Belt Snapping")]
+    public float portSnapRadius = 1.5f;
+    private float offsetFromPort = -0.3f;
 
     private void OnEnable()
     {
@@ -46,21 +52,21 @@ public class PlacementManager : MonoBehaviour
 
     private void OnToggleInventoryItem()
     {
-        DestroyPreview();
-        enable = false;
+        DestroyAllPreviews();
+        enable = !enable;
     }
 
     private void OnInventoryItemChanged()
     {
-        DestroyPreview();
-        enable = inventory.SelectedItem != null; // Enable placement if item selected
+        DestroyAllPreviews();
+        enable = inventory.SelectedItem != null;
+        currentType = inventory.SelectedItem.isBelt ? BuildType.Belt : BuildType.Machine;
     }
 
     private void Update()
     {
-        if (!enable) return;
+        if (!enable || inventory.SelectedItem == null) return;
 
-        // Handle preview and input based on type
         if (currentType == BuildType.Machine)
         {
             HandleMachinePreview();
@@ -71,10 +77,16 @@ public class PlacementManager : MonoBehaviour
         }
         else if (currentType == BuildType.Belt)
         {
-            HandleBeltPreview();
+            // ⭐ NEW: show belt preview BEFORE clicking
+            if (!placingBelt)
+                HandleIdleBeltPreview();
 
             if (Input.GetMouseButtonDown(0))
                 StartBeltPlacement();
+
+            if (placingBelt)
+                HandleBeltPreview();
+
             if (Input.GetMouseButtonUp(0))
                 FinishBeltPlacement();
         }
@@ -84,17 +96,20 @@ public class PlacementManager : MonoBehaviour
     {
         enable = _enable;
         currentType = type;
-        DestroyPreview();
+        DestroyAllPreviews();
     }
 
     /* ===================== MACHINE ===================== */
     void HandleMachinePreview()
     {
         var item = inventory.SelectedItem;
-        if (item == null) { DestroyPreview(); return; }
+        if (item == null) return;
 
-        Ray ray = new Ray(playerCamera.position, playerCamera.forward);
-        if (!Physics.Raycast(ray, out RaycastHit hit, placementDistance, placementLayer)) { DestroyPreview(); return; }
+        if (!Physics.Raycast(playerCamera.position, playerCamera.forward, out RaycastHit hit, placementDistance, placementLayer))
+        {
+            DestroySinglePreview();
+            return;
+        }
 
         Vector3 position = SnapToGrid(hit.point);
         validPlacement = true;
@@ -131,21 +146,10 @@ public class PlacementManager : MonoBehaviour
         if (!validPlacement || currentPreview == null) return;
 
         var item = inventory.SelectedItem;
-        if (item == null) return;
-
         GameObject obj = Instantiate(item.prefab, currentPreview.transform.position, Quaternion.Euler(0, previewRotationY, 0));
-        Machine machine = obj.GetComponent<Machine>();
-        if (machine != null)
-            machine.Initialize(item.machineData);
 
-        // Auto-connect to resource node if extractor
-        if (item.machineData.role == MachineRole.Extractor)
-        {
-            Collider[] hits = Physics.OverlapSphere(obj.transform.position, 2f, placementLayer);
-            foreach (var hit in hits)
-                if (hit.TryGetComponent<ResourceNode>(out var node))
-                    node.ConnectMachine(machine);
-        }
+        if (obj.TryGetComponent(out Machine machine))
+            machine.Initialize(item.machineData);
     }
 
     void HandleRotation()
@@ -155,60 +159,137 @@ public class PlacementManager : MonoBehaviour
         {
             previewRotationY += scroll * rotationStep;
             previewRotationY = Mathf.Round(previewRotationY / rotationStep) * rotationStep;
+
             if (currentPreview != null)
                 currentPreview.transform.rotation = Quaternion.Euler(0, previewRotationY, 0);
         }
     }
 
     /* ===================== BELT ===================== */
-    void HandleBeltPreview()
+    void HandleIdleBeltPreview()
     {
-        if (!placingBelt) return;
-
-        if (Physics.Raycast(playerCamera.position, playerCamera.forward, out RaycastHit hit, placementDistance, placementLayer))
+        if (!Physics.Raycast(
+            playerCamera.position,
+            playerCamera.forward,
+            out RaycastHit hit,
+            placementDistance,
+            placementLayer))
         {
-            Vector3 endPos = SnapToGrid(hit.point);
-            DrawBeltPreview(beltStartPos, endPos);
+            DestroyIdleBeltPreview();
+            return;
+        }
+
+        Vector3 pos = SnapToGrid(hit.point);
+
+        // 🔹 SNAP PRIORITY
+        // 1. Machine OUTPUT
+        if (TryGetMachinePort(pos, out Transform port, output: true))
+        {
+            pos = port.position + new Vector3(offsetFromPort, 0, 0);
+        }
+        // 2. Existing belt
+        else if (TrySnapToBelt(pos, out Vector3 beltSnap))
+        {
+            pos = beltSnap;
+        }
+
+        if (idleBeltPreview == null)
+        {
+            idleBeltPreview = Instantiate(
+                inventory.SelectedItem.prefab,
+                pos,
+                Quaternion.identity
+            );
+
+            DisablePreviewColliders(idleBeltPreview);
+            SetPreviewTransparency(idleBeltPreview, 0.4f);
+        }
+        else
+        {
+            idleBeltPreview.transform.position = pos;
         }
     }
+
 
     void StartBeltPlacement()
     {
         if (placingBelt) return;
-        if (Physics.Raycast(playerCamera.position, playerCamera.forward, out RaycastHit hit, placementDistance, placementLayer))
+
+        if (Physics.Raycast(playerCamera.position, playerCamera.forward,
+            out RaycastHit hit, placementDistance, placementLayer))
         {
-            beltStartPos = SnapToGrid(hit.point);
+            Vector3 snapped = SnapToGrid(hit.point);
+
+            // 🔹 SNAP TO MACHINE OUTPUT PORT
+            if (TryGetMachinePort(snapped, out Transform port, output: true))
+                beltStartPos = port.position + new Vector3(offsetFromPort, 0, 0);
+            else
+                beltStartPos = snapped;
+
             placingBelt = true;
+        }
+    }
+
+    void HandleBeltPreview()
+    {
+        if (!placingBelt) return;
+
+        if (Physics.Raycast(playerCamera.position, playerCamera.forward,
+            out RaycastHit hit, placementDistance, placementLayer))
+        {
+            Vector3 end = SnapToGrid(hit.point);
+
+            Debug.Log("Raycasting : " + hit.collider.name);
+            // 🔹 SNAP TO MACHINE INPUT PORT
+            if (TryGetMachinePort(end, out Transform port, output: false))
+                end = port.position + new Vector3(offsetFromPort, 0, 0);
+
+            DrawBeltPreview(beltStartPos, end);
         }
     }
 
     void FinishBeltPlacement()
     {
         if (!placingBelt) return;
-        if (Physics.Raycast(playerCamera.position, playerCamera.forward, out RaycastHit hit, placementDistance, placementLayer))
-        {
-            Vector3 endPos = SnapToGrid(hit.point);
-            PlaceBeltSegments(beltStartPos, endPos, inventory.SelectedItem);
-        }
         placingBelt = false;
-        DestroyPreview();
+
+        if (Physics.Raycast(playerCamera.position, playerCamera.forward,
+            out RaycastHit hit, placementDistance, placementLayer))
+        {
+            Vector3 end = SnapToGrid(hit.point);
+
+            if (TryGetMachinePort(end, out Transform port, output: false))
+                end = port.position + new Vector3(offsetFromPort, 0, 0);
+
+            PlaceBeltSegments(beltStartPos, end, inventory.SelectedItem);
+        }
+
+        DestroyAllPreviews();
     }
 
     void DrawBeltPreview(Vector3 start, Vector3 end)
     {
-        DestroyPreview();
+        DestroyBeltDragPreviews(); // ❗ CHANGED (not DestroyAll)
 
-        Vector3 dir = (end - start).normalized;
+        Vector3 dir = end - start;
+        if (dir.sqrMagnitude < 0.01f) return;
+
+        dir.Normalize();
         float distance = Vector3.Distance(start, end);
-        int segments = Mathf.CeilToInt(distance / beltSegmentLength);
+        int segments = Mathf.FloorToInt(distance / beltSegmentLength);
 
-        for (int i = 0; i < segments; i++)
+        for (int i = 0; i <= segments; i++)
         {
             Vector3 pos = start + dir * i * beltSegmentLength;
-            currentPreview = GameObject.CreatePrimitive(PrimitiveType.Cube); // placeholder
-            currentPreview.transform.position = pos + Vector3.up * 0.1f;
-            currentPreview.transform.localScale = new Vector3(0.3f, 0.1f, beltSegmentLength);
-            currentPreview.GetComponent<Collider>().enabled = false;
+            GameObject preview = Instantiate(
+                inventory.SelectedItem.prefab,
+                pos,
+                Quaternion.LookRotation(dir)
+            );
+
+            DisablePreviewColliders(preview);
+            SetPreviewTransparency(preview, 0.4f);
+            currentPreviews.Add(preview);
         }
     }
 
@@ -216,33 +297,73 @@ public class PlacementManager : MonoBehaviour
     {
         Vector3 dir = (end - start).normalized;
         float distance = Vector3.Distance(start, end);
-        int segments = Mathf.CeilToInt(distance / beltSegmentLength);
+        int segments = Mathf.FloorToInt(distance / beltSegmentLength);
 
-        ConveyorBelt previousBelt = null;
+        ConveyorBelt previous = null;
 
-        for (int i = 0; i < segments; i++)
+        for (int i = 0; i <= segments; i++)
         {
             Vector3 pos = start + dir * i * beltSegmentLength;
             GameObject obj = Instantiate(item.prefab, pos, Quaternion.LookRotation(dir));
-            ConveyorBelt belt = obj.GetComponent<ConveyorBelt>();
-            if (belt != null)
+
+            if (!obj.TryGetComponent(out ConveyorBelt belt)) continue;
+
+            // Assign start/end points for visuals
+            if (previous != null)
             {
-                belt.speed = item.beltSpeed;
-                belt.capacity = item.beltCapacity;
+                previous.outputBelt = belt;
+                belt.inputBelt = previous;
 
-                if (previousBelt != null)
-                    previousBelt.outputBelt = belt;
-
-                previousBelt = belt;
-
-                // Connect to nearby machines
-                Collider[] hits = Physics.OverlapSphere(pos, 1.5f, placementLayer);
-                foreach (var hit in hits)
+                previous.startPoint ??= previous.transform; // fallback
+                previous.endPoint = belt.transform;
+            }
+            else
+            {
+                // First belt: connect to machine output if snapping to port
+                if (TryGetMachinePort(start, out Transform port, output: true))
                 {
-                    if (hit.TryGetComponent<Machine>(out var machine))
-                        belt.ConnectToMachine(machine);
+                    Machine sourceMachine = port.GetComponentInParent<Machine>();
+                    if (sourceMachine != null)
+                    {
+                        belt.ConnectToMachine(sourceMachine, asInput: false);
+                        sourceMachine.ConnectBelt(belt);
+                        belt.startPoint = port;
+                    }
+                    else
+                    {
+                        belt.startPoint = belt.transform;
+                    }
+                }
+                else
+                {
+                    belt.startPoint = belt.transform;
                 }
             }
+
+            // Last belt's endPoint points to machine input if snapping
+            if (i == segments)
+            {
+                if (TryGetMachinePort(end, out Transform endPort, output: false))
+                {
+                    Machine targetMachine = endPort.GetComponentInParent<Machine>();
+                    if (targetMachine != null)
+                    {
+                        belt.ConnectToMachine(targetMachine, asInput: true);
+                        targetMachine.ConnectBelt(belt);
+                        belt.endPoint = endPort;
+                    }
+                    else
+                    {
+                        belt.endPoint = belt.transform;
+                    }
+                }
+                else
+                {
+                    belt.endPoint = belt.transform;
+                }
+            }
+
+            previous = belt;
         }
     }
 
@@ -256,19 +377,49 @@ public class PlacementManager : MonoBehaviour
         );
     }
 
-    void DestroyPreview()
+    void DestroyIdleBeltPreview()
+    {
+        if (idleBeltPreview != null)
+            Destroy(idleBeltPreview);
+        idleBeltPreview = null;
+    }
+
+    void DestroyBeltDragPreviews()
+    {
+        foreach (var p in currentPreviews)
+            Destroy(p);
+        currentPreviews.Clear();
+    }
+
+    void DestroySinglePreview()
     {
         if (currentPreview != null)
-        {
             Destroy(currentPreview);
-            currentPreview = null;
-        }
+        currentPreview = null;
+    }
+
+    void DestroyAllPreviews()
+    {
+        DestroySinglePreview();
+        DestroyIdleBeltPreview();
+        DestroyBeltDragPreviews();
     }
 
     void DisablePreviewColliders(GameObject preview)
     {
         foreach (var col in preview.GetComponentsInChildren<Collider>())
             col.enabled = false;
+    }
+
+    void SetPreviewTransparency(GameObject obj, float alpha)
+    {
+        foreach (Renderer r in obj.GetComponentsInChildren<Renderer>())
+        {
+            Material m = r.material;
+            Color c = m.color;
+            c.a = alpha;
+            m.color = c;
+        }
     }
 
     void SetPreviewColor(bool valid)
@@ -281,5 +432,45 @@ public class PlacementManager : MonoBehaviour
             Material mat = r.material;
             mat.color = new Color(c.r, c.g, c.b, 0.5f);
         }
+    }
+
+    bool TryGetMachinePort(Vector3 pos, out Transform port, bool output)
+    {
+        Collider[] hits = Physics.OverlapSphere(pos, portSnapRadius, placementLayer);
+
+        foreach (var h in hits)
+        {
+            Transform p = null;
+            if (h.transform.name == StringConstants.outputPort || h.transform.name == StringConstants.inputPort)
+            {
+                p = h.transform;
+            }
+
+            if (p != null)
+            {
+                port = p;
+                return true;
+            }
+        }
+
+        port = null;
+        return false;
+    }
+
+    bool TrySnapToBelt(Vector3 pos, out Vector3 snapPos)
+    {
+        Collider[] hits = Physics.OverlapSphere(pos, portSnapRadius, placementLayer);
+
+        foreach (var h in hits)
+        {
+            if (h.TryGetComponent(out ConveyorBelt belt))
+            {
+                snapPos = belt.transform.position;
+                return true;
+            }
+        }
+
+        snapPos = Vector3.zero;
+        return false;
     }
 }
