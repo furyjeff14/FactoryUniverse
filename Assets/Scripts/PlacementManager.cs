@@ -106,7 +106,7 @@ public class PlacementManager : MonoBehaviour
     /* ===================== MACHINE ===================== */
     void HandleMachinePreview()
     {
-        var item = inventory.SelectedItem;
+        BuildItemSO item = inventory.SelectedItem;
         if (item == null) return;
 
         if (!Physics.Raycast(playerCamera.position, playerCamera.forward, out RaycastHit hit, placementDistance, placementLayer))
@@ -139,10 +139,13 @@ public class PlacementManager : MonoBehaviour
         }
         else
         {
+
             if (!validPlacement)
             {
-                position = hit.point;
-            } 
+                float itemHeight = item.prefab.GetComponent<Collider>().bounds.center.y;
+                position = hit.point + Vector3.up * itemHeight;
+            }
+
             currentPreview.transform.SetPositionAndRotation(position, Quaternion.Euler(0, previewRotationY, 0));
         }
 
@@ -194,8 +197,20 @@ public class PlacementManager : MonoBehaviour
         if (TryGetMachinePort(pos, out Transform port, output: true))
         {
             Machine machine = port.GetComponentInParent<Machine>();
-
-            pos = port.position + port.forward * machine.offsetToOutput.z;
+            MachineMaterialHandler availableHandler = null;
+            for(int i = 0;machine.inputMaterials != null && i < machine.inputMaterials.Length; i++)
+            {
+                if (!machine.inputMaterials[i].isInUse)
+                {
+                    availableHandler = machine.inputMaterials[i];
+                    break;
+                }
+            }
+            if (availableHandler != null)
+            {
+                pos = /*port.position + port.forward +*/ availableHandler.chute.transform.position;
+                // pos = port.position + port.forward * machine.offsetToOutput.z;
+            }
         }
         // 2. Existing belt
         else if (TrySnapToBelt(pos, out Vector3 beltSnap))
