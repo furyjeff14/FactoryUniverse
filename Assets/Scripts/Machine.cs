@@ -5,6 +5,8 @@ public class Machine : MonoBehaviour
 {
     public MachineNodeSO machineData;
     public float productionRate = 1f; // units/sec
+    public MachineMaterialHandler[] inputMaterials;
+    public MachineMaterialHandler[] outputMaterials;
     public GameObject outputItemPrefab;
 
     [HideInInspector] public Dictionary<string, float> inputBuffers = new();
@@ -16,6 +18,7 @@ public class Machine : MonoBehaviour
 
     private bool initialized = false;
     public ResourceNode attachedNode;
+    public Vector3 offsetToOutput = Vector3.zero;
 
     void Start()
     {

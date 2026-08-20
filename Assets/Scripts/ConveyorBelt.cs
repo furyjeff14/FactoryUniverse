@@ -152,7 +152,7 @@ public class ConveyorBelt : MonoBehaviour
         foreach (var rb in objectsOnBelt)
         {
             if (rb != null)
-                rb.velocity = new Vector3(movement.x, rb.velocity.y, movement.z);
+                rb.linearVelocity = new Vector3(movement.x, rb.linearVelocity.y, movement.z);
         }
     }
 

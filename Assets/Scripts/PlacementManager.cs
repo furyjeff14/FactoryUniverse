@@ -30,7 +30,7 @@ public class PlacementManager : MonoBehaviour
 
     [Header("Belt Snapping")]
     public float portSnapRadius = 1.5f;
-    private float offsetFromPort = -0.3f;
+    private float offsetFromBelt = -0.3f;
 
     private void OnEnable()
     {
@@ -77,18 +77,22 @@ public class PlacementManager : MonoBehaviour
         }
         else if (currentType == BuildType.Belt)
         {
-            // ⭐ NEW: show belt preview BEFORE clicking
-            if (!placingBelt)
+            //Show belt preview BEFORE clicking
+            //if (!placingBelt)
                 HandleIdleBeltPreview();
 
             if (Input.GetMouseButtonDown(0))
-                StartBeltPlacement();
+                if (!placingBelt)
+                {
+                    StartBeltPlacement();
+                } else
+                {
+                    FinishBeltPlacement();
+                }
 
-            if (placingBelt)
-                HandleBeltPreview();
-
-            if (Input.GetMouseButtonUp(0))
-                FinishBeltPlacement();
+            //if (placingBelt)
+                //HandleBeltPreview();
+                
         }
     }
 
@@ -135,6 +139,10 @@ public class PlacementManager : MonoBehaviour
         }
         else
         {
+            if (!validPlacement)
+            {
+                position = hit.point;
+            } 
             currentPreview.transform.SetPositionAndRotation(position, Quaternion.Euler(0, previewRotationY, 0));
         }
 
@@ -185,7 +193,9 @@ public class PlacementManager : MonoBehaviour
         // 1. Machine OUTPUT
         if (TryGetMachinePort(pos, out Transform port, output: true))
         {
-            pos = port.position + new Vector3(offsetFromPort, 0, 0);
+            Machine machine = port.GetComponentInParent<Machine>();
+
+            pos = port.position + port.forward * machine.offsetToOutput.z;
         }
         // 2. Existing belt
         else if (TrySnapToBelt(pos, out Vector3 beltSnap))
@@ -222,7 +232,7 @@ public class PlacementManager : MonoBehaviour
 
             // 🔹 SNAP TO MACHINE OUTPUT PORT
             if (TryGetMachinePort(snapped, out Transform port, output: true))
-                beltStartPos = port.position + new Vector3(offsetFromPort, 0, 0);
+                beltStartPos = port.position + new Vector3(offsetFromBelt, 0, 0);
             else
                 beltStartPos = snapped;
 
@@ -242,7 +252,7 @@ public class PlacementManager : MonoBehaviour
             Debug.Log("Raycasting : " + hit.collider.name);
             // 🔹 SNAP TO MACHINE INPUT PORT
             if (TryGetMachinePort(end, out Transform port, output: false))
-                end = port.position + new Vector3(offsetFromPort, 0, 0);
+                end = port.position + new Vector3(offsetFromBelt, 0, 0);
 
             DrawBeltPreview(beltStartPos, end);
         }
@@ -259,7 +269,7 @@ public class PlacementManager : MonoBehaviour
             Vector3 end = SnapToGrid(hit.point);
 
             if (TryGetMachinePort(end, out Transform port, output: false))
-                end = port.position + new Vector3(offsetFromPort, 0, 0);
+                end = port.position + new Vector3(offsetFromBelt, 0, 0);
 
             PlaceBeltSegments(beltStartPos, end, inventory.SelectedItem);
         }
